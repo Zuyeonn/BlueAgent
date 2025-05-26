@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BlueAI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <nav id="navbar">
+      <div class="nav-content">
+        <div class="nav-title">BlueAI</div>
+      </div>
+    </nav>
+
+    <main id="chat-container">
+      <div id="chat-box"></div>
+    </main>
+
+    <footer id="input-container">
+      <div class="input-wrapper">
+        <input
+          id="user-input"
+          type="text"
+          placeholder="메시지를 입력하세요..."
+          onkeypress="if(event.key === 'Enter') sendMessage()"
+        >
+        <button onclick="sendMessage()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+<script>
+  function addLoadingIndicator(chatBox) {
+    chatBox.innerHTML += `
+      <div class="message-wrapper bot typing-indicator">
+        <div class="message">
+          <div class="avatar">
+            <img src="./static/image/bot.png" alt="Bot">
+          </div>
+          <div class="dots">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+        </div>
+      </div>`;
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  function removeLoadingIndicator(chatBox) {
+    const loadingIndicator = chatBox.querySelector('.typing-indicator');
+    if (loadingIndicator) {
+      loadingIndicator.remove();
+    }
+  }
+
+  async function sendMessage() {
+    const input = document.getElementById("user-input");
+    const message = input.value.trim();
+    if (!message) return;
+
+    const chatBox = document.getElementById("chat-box");
+    chatBox.innerHTML += `
+      <div class="message-wrapper user">
+        <div class="message">
+          <div class="bubble">${message}</div>
+          <div class="avatar">
+            <img src="./static/image/user.png" alt="User">
+          </div>
+        </div>
+      </div>`;
+    input.value = "";
+
+    addLoadingIndicator(chatBox);
+
+    let intent = "unknown";
+
+    try {
+      const res = await fetch("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message })
+      });
+
+      const data = await res.json();
+      console.log("Server response:", data);
+
+      removeLoadingIndicator(chatBox);
+
+      intent = data.intent || "unknown";
+      const response = ("response" in data) ? data.response : "응답이 없습니다.";
+
+      let botMessage = `
+        <div class="message-wrapper bot">
+          <div class="message">
+            <div class="avatar">
+              <img src="./static/image/bot.png" alt="Bot">
+            </div>
+            <div class="bubble">
+              <div class="intent-label">${intent}</div>
+              <div class="response-text">${response}</div>
+            </div>
+          </div>
+        </div>`;
+
+      if (data.image_base64) {
+        botMessage += `
+          <div class="message-wrapper bot">
+            <div class="message">
+              <div class="avatar">
+                <img src="./static/image/bot.png" alt="Bot">
+              </div>
+              <div class="bubble image-bubble">
+                <img src="data:image/png;base64,${data.image_base64}" alt="Generated Image">
+              </div>
+            </div>
+          </div>`;
+      }
+
+      chatBox.innerHTML += botMessage;
+    } catch (error) {
+      console.error("Error:", error);
+      removeLoadingIndicator(chatBox);
+      
+      chatBox.innerHTML += `
+        <div class="message-wrapper bot">
+          <div class="message">
+            <div class="avatar">
+              <img src="./static/image/bot.png" alt="Bot">
+            </div>
+            <div class="bubble">
+              <div class="intent-label">${intent}</div>
+              <div class="response-text">오류가 발생했습니다: ${error.message}</div>
+            </div>
+          </div>
+        </div>`;
+    }
+    
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("user-input").focus();
+  });
+</script>
+
+</body>
+</html>
