@@ -1,0 +1,20 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# IDE/Editor settings
+*.iml
+.idea/
+.vscode/
+
+# OS/Editor-specific
+.DS_Store
+*.swp
+
+# XML project config
+*.xml
+
+# Model files
+models/
+
+static/image/
