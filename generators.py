@@ -68,6 +68,7 @@ def generate_report_from_question(question, model, tokenizer, summary_context):
 질문: {question}
 
 위 내용을 참고해 자연스럽고 간결한 한국어 문장으로 요약하세요.
+**주의: 절대 '참고:'나 부가 설명은 쓰지 마세요.**
 반드시 'Response:'로 시작하고, 구체적 수치는 문장 안에 녹여 쓰세요. 
 Response: """
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
