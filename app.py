@@ -25,7 +25,7 @@ model = AutoModelForCausalLM.from_pretrained(
 model.eval()
 
 # RAG 모델 로드
-embedder, index, corpus = load_rag_index()
+embedder, faiss_index, corpus = load_rag_index()
 
 # DB 연결
 conn = sqlite3.connect("user_data.db", check_same_thread=False)
@@ -104,7 +104,7 @@ def ask():
 
     else:
         try:
-            response = handle_rag_query(user_question, model, tokenizer, embedder, index, corpus)
+            response = handle_rag_query(user_question, model, tokenizer, embedder, faiss_index, corpus)
             chat_history.append({"role": "assistant", "content": response})
             return jsonify({"intent": "rag", "response": response})
         except Exception as e:
