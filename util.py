@@ -51,3 +51,29 @@ def extract_python_code(text):
         if "import matplotlib.pyplot as plt" in line:
             return "\n".join(lines[i:]).strip()
     return text.strip()
+
+def extract_recent_days(question: str) -> int | None:
+    import re
+    # 숫자 기반 표현
+    match = re.search(r"(최근\s*(\d+)\s*일|(\d+)\s*일\s*간)", question)
+    if match:
+        number = match.group(2) or match.group(3)
+        return int(number)
+
+    # 자연어 표현 매핑
+    keyword_map = {
+        "일주일": 7,
+        "일 주일": 7,
+        "한 주": 7,
+        "1주일": 7,
+        "한달": 30,
+        "한 달": 30,
+        "1개월": 30,
+        "한달간": 30
+    }
+
+    for keyword, days in keyword_map.items():
+        if keyword in question:
+            return days
+
+    return None  # 기간 표현이 없으면 None
