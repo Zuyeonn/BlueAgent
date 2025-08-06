@@ -77,3 +77,31 @@ def extract_recent_days(question: str) -> int | None:
             return days
 
     return None  # 기간 표현이 없으면 None
+
+
+def extract_date_or_month(question: str):
+    import re
+    from datetime import datetime
+    # 일 단위 ("6월 15일", "7/2")
+    pattern_day = r"(\d{1,2})[월/\s]*(\d{1,2})[일]?"
+    match_day = re.search(pattern_day, question)
+    if match_day:
+        month, day = match_day.groups()
+        try:
+            year = datetime.today().year
+            dt = datetime(year, int(month), int(day))
+            return {"type": "day", "value": dt.strftime("%Y-%m-%d")}
+        except:
+            pass
+    # 월 단위 ("6월", "2024년 6월", "6월달")
+    pattern_month = r"(?:(\d{4})년\s*)?(\d{1,2})월(달)?"
+    match_month = re.search(pattern_month, question)
+    if match_month:
+        year, month, _ = match_month.groups()
+        year = int(year) if year else datetime.today().year
+        try:
+            dt = datetime(year, int(month), 1)
+            return {"type": "month", "value": dt.strftime("%Y-%m")}
+        except:
+            pass
+    return None
