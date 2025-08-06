@@ -1,4 +1,5 @@
 import torch
+import re
 import json
 from util import extract_plot_target
 
@@ -100,12 +101,13 @@ def generate_response_from_query_with_history(question, rows, chat_history, mode
 Response: """
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=300)
+        output = model.generate(**inputs, max_new_tokens=400)
     return tokenizer.decode(output[0], skip_special_tokens=True).strip().split("Response:")[-1].strip()
 
 def generate_rag_response(question, context_docs, model, tokenizer):
     context = "\n".join(context_docs)
     prompt = f"""당신은 사용자 질문에 대해 배경 정보를 참고해 응답하는 시스템입니다.
+사용자의 질문을 정확히 파악하고, 관련된 지표에 대해서만 답변하세요.
 
 배경 문서:
 {context}
@@ -117,7 +119,9 @@ def generate_rag_response(question, context_docs, model, tokenizer):
 - Response: PPG는 광용적맥파를 의미하며, 스트레스 지수와 관련 있습니다.
 - Response: HRV는 자율신경계의 균형을 판단하는 주요 지표입니다.
 
-배경 문서를 참고하여 자연스럽고 간결한 한국어로 한 문장으로 요약하세요.
+배경 문서를 참고하여 자연스럽고 간결한 한국어로 1~2문장으로 요약하세요.
+위 문서가 질문과 관련이 없다면 "관련 정보를 찾을 수 없습니다"라고 답변하세요.
+**주의: 절대 '참고:'나 부가 설명은 쓰지 마세요.**
 반드시 'Response:'로 시작하세요.
 Response: """
 
@@ -126,3 +130,104 @@ Response: """
         output = model.generate(**inputs, max_new_tokens=200, do_sample=False)
 
     return tokenizer.decode(output[0], skip_special_tokens=True).strip().split("Response:")[-1].strip()
+
+
+# LLM 기반 intent fallback 분류
+def generate_intent_from_llm(question: str, model, tokenizer) -> str:
+    prompt = f"""
+당신은 사용자 질문을 아래 목록 중 하나의 intent 유형으로 분류하는 시스템입니다.
+
+각 intent의 정의는 다음과 같습니다:
+
+- rag: 특정 수치(PPG, HRV, 스트레스 지수)의 의미, 기준, 정상 여부 등을 묻는 질문  
+- report: 특정 사람의 지표에 대한 평균, 최대/최소값, 통계 등 요약을 요청하는 질문  
+- visual: 특정 사람의 그래프나 시계열 시각화를 요청하는 질문  
+- filter_rag: 
+    1) 수치 조건(예: 90 이상, 100 미만 등)에 부합하는 사람을 찾는 질문  
+    2) HRV, 스트레스, PPG 등을 기준으로 **안정적/불안정한 상태의 사람을 찾는 질문**
+- stress_reason: 특정 사람의 스트레스가 높거나 낮은 이유를 묻는 질문  
+- chitchat: 인사, 감탄, 테스트 등 대화의 시작이나 목적 없는 간단한 말  
+
+
+사용자 질문:
+\"{question}\"
+
+해당 질문에 가장 적절한 의도 하나를 출력하세요. 반드시 '의도:'로 시작하세요.
+
+의도:"""
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        outputs = model.generate(**inputs, max_new_tokens=20, do_sample=False, temperature=0.0)
+    decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    match = re.search(r"의도[:：]?\s*(rag|report|visual|filter_rag|stress_reason|chitchat)\b", decoded, re.IGNORECASE)
+
+    return match.group(1).lower() if match else "ambiguous"
+
+
+# 스트레스 원인 답변 프롬프트 (ppg, hrv 데이터 기반)
+def generate_stress_reason_from_data(question, model, tokenizer, target_name, rows, specific_date=None):
+    import json
+    import numpy as np
+
+    ppg_stds = []
+    hrv_values = []
+
+    for r in rows:
+        if r[1] != target_name:
+            continue
+        try:
+            ppg = json.loads(r[3]) if isinstance(r[3], str) else r[3]
+        except:
+            ppg = []
+        if isinstance(ppg, list) and len(ppg) > 0:
+            ppg_stds.append(np.std(ppg))
+        hrv = r[4]
+        if isinstance(hrv, (int, float)):
+            hrv_values.append(hrv)
+
+    if not hrv_values and not ppg_stds:
+        return f"{target_name}님의 해당 날짜의 유효한 HRV/PPG 데이터가 부족합니다."
+
+    # 수치 요약 텍스트
+    summary_text = f"[{target_name}님의 {'해당 날짜' if specific_date else '최근 수치'} 요약]\n"
+    if hrv_values:
+        summary_text += f"- HRV 최근값: {hrv_values[-1]:.1f}, 평균: {np.mean(hrv_values):.2f}\n"
+    if ppg_stds:
+        summary_text += f"- PPG 변동성 최근값: {ppg_stds[-1]:.2f}, 평균: {np.mean(ppg_stds):.2f}\n"
+
+    summary_context = summary_text.strip()
+
+    prompt = f"""당신은 사용자 HRV, PPG 데이터를 기반으로 스트레스 원인을 설명하는 시스템입니다.
+
+{summary_context}
+
+질문: {question}
+
+---
+
+아래 조건을 바탕으로 스트레스 원인을 설명하는 1~2문장을 작성하세요:
+- 최근값과 평균을 비교해, 수치가 얼마나 다른지 (높거나 낮음) 판단하세요.
+- HRV가 평균보다 낮다면 스트레스가 증가할 수 있습니다.
+- PPG 변동성이 높다면 스트레스 요인이 증가했을 수 있습니다.
+- 두 지표가 모두 기준과 다르면 **두 가지 모두를 근거로** 설명하세요.
+- 수치가 큰 차이가 없으면 “안정적”이나 “외부 요인 가능성”도 고려해 설명하세요.
+
+---
+
+예시 응답:
+- Response: HRV가 평균보다 낮고, PPG 변동성이 높아 스트레스가 증가한 것으로 보입니다.
+- Response: PPG 변동성이 증가했지만 HRV는 안정적입니다. 외부 요인 가능성이 있습니다.
+- Response: HRV와 PPG 모두 평소 수준으로, 스트레스 증가 원인을 특정하기 어렵습니다.
+
+
+구체적인 수치를 활용해 자연스럽고 간결한 한국어 문장으로 1~2문장 작성하세요.  
+절대 '참고:'나 '요약:' 같은 말은 포함하지 마세요. 반드시 'Response:'로 시작하세요.
+
+Response:"""
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        output = model.generate(**inputs, max_new_tokens=200, do_sample=False)
+    reason = tokenizer.decode(output[0], skip_special_tokens=True).strip().split("Response:")[-1].strip()
+    return summary_context + "\n\n[원인 분석]\n" + reason
+
